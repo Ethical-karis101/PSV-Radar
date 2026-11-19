@@ -44,9 +44,6 @@ KENYA_TIME = ZoneInfo("Africa/Nairobi")
 
 initialize_database()
 
-# Serve the compiled React shell when the backend is deployed as one service.
-from backend import dashboard as _dashboard  # noqa: E402,F401
-
 
 class PassengerEvent(BaseModel):
     event_id: str
@@ -157,3 +154,8 @@ def daily_summary(vehicle_id: str, day: date):
         "boardings": counts["boarding"],
         "alightings": counts["alighting"],
     }
+
+
+# Serve the compiled React shell when the backend is deployed as one service.
+# Imported last: the "/" mount must come after every API route, or it shadows them.
+from backend import dashboard as _dashboard  # noqa: E402,F401
