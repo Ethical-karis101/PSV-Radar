@@ -11,10 +11,12 @@ from backend.database import DATABASE_PATH, save_event
 
 from backend.fare_routes import router as fare_router
 from backend.journey_routes import router as journey_router
+from backend.revenue_routes import router as revenue_router
 
 app = FastAPI(title="PSV-Radar")
 app.include_router(fare_router)
 app.include_router(journey_router)
+app.include_router(revenue_router)
 KENYA_TIME = ZoneInfo("Africa/Nairobi")
 
 
