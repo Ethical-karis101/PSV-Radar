@@ -8,32 +8,34 @@
     * { box-sizing: border-box; }
     body { margin: 0; background: #f2f6f4; color: #18312b; font: 1rem system-ui, sans-serif; }
     main { max-width: 48rem; margin: 3rem auto; padding: 0 1rem; }
-    form, .counts { display: flex; flex-wrap: wrap; gap: 1rem; }
-    form { align-items: end; }
+    form { display: flex; flex-wrap: wrap; align-items: end; gap: 1rem; }
     label { display: grid; gap: .4rem; }
     input, button { font: inherit; padding: .65rem; border: 1px solid #788d85; border-radius: .4rem; }
     button { background: #146350; color: white; cursor: pointer; }
     button:disabled { opacity: .65; cursor: wait; }
-    .counts > div { flex: 1 1 10rem; background: white; padding: 1rem; border-radius: .6rem; }
+    .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr)); gap: 1rem; }
+    .metrics > div { background: white; padding: 1rem; border-radius: .6rem; }
     dt { font-weight: 600; }
-    dd { margin: .4rem 0 0; font-size: 2rem; }
+    dd { margin: .4rem 0 0; font-size: 1.75rem; }
   </style>
 </head>
 <body>
   <main>
     <h1>PSV-Radar</h1>
-    <h2>Daily passenger summary</h2>
+    <h2>Daily vehicle summary</h2>
 
     <form id="summary-form">
-      <label>Vehicle ID <input name="vehicle_id" value="psv-001" required></label>
+      <label>Vehicle ID <input name="vehicle_id" value="psv-journey-demo" required></label>
       <label>Date in Kenya <input name="day" type="date" value="2026-11-19" required></label>
       <button type="submit">Load summary</button>
     </form>
 
     <p id="status" role="status"></p>
-    <dl class="counts">
+    <dl class="metrics">
       <div><dt>Boardings</dt><dd id="boardings">–</dd></div>
       <div><dt>Alightings</dt><dd id="alightings">–</dd></div>
+      <div><dt>Completed journeys</dt><dd id="journeys">–</dd></div>
+      <div><dt>Expected revenue</dt><dd id="revenue">–</dd></div>
     </dl>
   </main>
 
@@ -43,33 +45,49 @@
     const status = document.querySelector("#status");
     const boardings = document.querySelector("#boardings");
     const alightings = document.querySelector("#alightings");
+    const journeys = document.querySelector("#journeys");
+    const revenue = document.querySelector("#revenue");
+    const numberFormat = new Intl.NumberFormat("en-KE");
+
+    async function loadJson(url) {
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      return response.json();
+    }
 
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
       const values = new FormData(form);
-      const query = new URLSearchParams({
-        vehicle_id: values.get("vehicle_id").trim(),
-        day: values.get("day"),
-      });
+      const vehicleId = values.get("vehicle_id").trim();
 
-      boardings.textContent = "–";
-      alightings.textContent = "–";
-      if (!query.get("vehicle_id")) {
+      for (const metric of [boardings, alightings, journeys, revenue]) {
+        metric.textContent = "–";
+      }
+
+      if (!vehicleId) {
         status.textContent = "Enter a vehicle ID.";
         return;
       }
+
+      const query = new URLSearchParams({
+        vehicle_id: vehicleId,
+        day: values.get("day"),
+      });
 
       button.disabled = true;
       status.textContent = "Loading summary…";
 
       try {
-        const response = await fetch(`/events/summary?${query}`);
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const [passengers, dailyRevenue] = await Promise.all([
+          loadJson(`/events/summary?${query}`),
+          loadJson(`/revenue/daily?${query}`),
+        ]);
 
-        const summary = await response.json();
-        boardings.textContent = summary.boardings;
-        alightings.textContent = summary.alightings;
-        status.textContent = `Showing ${summary.vehicle_id} on ${summary.day}.`;
+        boardings.textContent = numberFormat.format(passengers.boardings);
+        alightings.textContent = numberFormat.format(passengers.alightings);
+        journeys.textContent = numberFormat.format(dailyRevenue.completed_journeys);
+        revenue.textContent = `KSh ${numberFormat.format(dailyRevenue.expected_revenue_kes)}`;
+        status.textContent = `Showing ${passengers.vehicle_id} on ${passengers.day}.`;
       } catch (error) {
         status.textContent = `Could not load the summary. ${error.message}`;
       } finally {
