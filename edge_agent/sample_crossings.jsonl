@@ -1,0 +1,2 @@
+{"event_id":"camera-demo-board-001","event_type":"boarding","stage_id":"stage-a","track_id":"door-track-1","confidence":0.94,"door_id":"main-door","occurred_at":"2026-11-19T08:30:00+03:00"}
+{"event_id":"camera-demo-alight-001","event_type":"alighting","stage_id":"stage-c","track_id":"door-track-9","confidence":0.91,"door_id":"main-door","occurred_at":"2026-11-19T08:45:00+03:00"}
