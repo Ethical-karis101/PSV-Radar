@@ -13,6 +13,7 @@ single-page app from the same origin.
 3. Add a Railway Volume to the service and set its mount path to `/data`.
 4. Add these service variables:
 
+
    | Variable | Value |
    | --- | --- |
    | `PSV_RADAR_DATABASE_PATH` | `/data/passenger_events.sqlite3` |
