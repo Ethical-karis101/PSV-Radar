@@ -1,10 +1,12 @@
+import sqlite3
+from contextlib import closing
 from datetime import datetime
 from typing import Literal
 
 from fastapi import FastAPI, HTTPException, Response
 from pydantic import BaseModel
 
-from backend.database import save_event
+from backend.database import DATABASE_PATH, save_event
 
 app = FastAPI(title="PSV-Radar")
 
@@ -45,3 +47,19 @@ def create_event(event: PassengerEvent, response: Response):
         response.status_code = 200
 
     return {"status": result, "event_id": event.event_id}
+
+
+@app.get("/events")
+def list_events():
+    with closing(sqlite3.connect(DATABASE_PATH)) as connection:
+        connection.row_factory = sqlite3.Row
+        rows = connection.execute(
+            """
+            SELECT event_id, vehicle_id, event_type, occurred_at
+            FROM passenger_events
+            ORDER BY rowid DESC
+            LIMIT 50
+            """
+        ).fetchall()
+
+    return {"events": [dict(row) for row in rows]}
