@@ -13,10 +13,10 @@
     input, button { font: inherit; padding: .65rem; border: 1px solid #788d85; border-radius: .4rem; }
     button { background: #146350; color: white; cursor: pointer; }
     button:disabled { opacity: .65; cursor: wait; }
-    .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr)); gap: 1rem; }
+    .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr)); gap: 1rem; }
     .metrics > div { background: white; padding: 1rem; border-radius: .6rem; }
     dt { font-weight: 600; }
-    dd { margin: .4rem 0 0; font-size: 1.75rem; }
+    dd { margin: .4rem 0 0; font-size: 1.5rem; }
   </style>
 </head>
 <body>
@@ -35,7 +35,9 @@
       <div><dt>Boardings</dt><dd id="boardings">–</dd></div>
       <div><dt>Alightings</dt><dd id="alightings">–</dd></div>
       <div><dt>Completed journeys</dt><dd id="journeys">–</dd></div>
-      <div><dt>Expected revenue</dt><dd id="revenue">–</dd></div>
+      <div><dt>Expected revenue</dt><dd id="expected">–</dd></div>
+      <div><dt>Declared collections</dt><dd id="declared">–</dd></div>
+      <div><dt>Variance</dt><dd id="variance">–</dd></div>
     </dl>
   </main>
 
@@ -43,11 +45,23 @@
     const form = document.querySelector("#summary-form");
     const button = form.querySelector("button");
     const status = document.querySelector("#status");
-    const boardings = document.querySelector("#boardings");
-    const alightings = document.querySelector("#alightings");
-    const journeys = document.querySelector("#journeys");
-    const revenue = document.querySelector("#revenue");
-    const numberFormat = new Intl.NumberFormat("en-KE");
+    const metrics = document.querySelectorAll(".metrics dd");
+    const numbers = new Intl.NumberFormat("en-KE");
+
+    function setMetric(id, value) {
+      document.getElementById(id).textContent = value;
+    }
+
+    function formatKes(amount) {
+      return `KSh ${numbers.format(amount)}`;
+    }
+
+    function formatVariance(amount) {
+      if (amount === null) return "Unavailable";
+      if (amount === 0) return formatKes(0);
+      const label = amount < 0 ? "shortfall" : "above expected";
+      return `${formatKes(Math.abs(amount))} ${label}`;
+    }
 
     async function loadJson(url) {
       const response = await fetch(url);
@@ -60,9 +74,7 @@
       const values = new FormData(form);
       const vehicleId = values.get("vehicle_id").trim();
 
-      for (const metric of [boardings, alightings, journeys, revenue]) {
-        metric.textContent = "–";
-      }
+      for (const metric of metrics) metric.textContent = "–";
 
       if (!vehicleId) {
         status.textContent = "Enter a vehicle ID.";
@@ -78,16 +90,20 @@
       status.textContent = "Loading summary…";
 
       try {
-        const [passengers, dailyRevenue] = await Promise.all([
+        const [passengers, revenue] = await Promise.all([
           loadJson(`/events/summary?${query}`),
           loadJson(`/revenue/daily?${query}`),
         ]);
 
-        boardings.textContent = numberFormat.format(passengers.boardings);
-        alightings.textContent = numberFormat.format(passengers.alightings);
-        journeys.textContent = numberFormat.format(dailyRevenue.completed_journeys);
-        revenue.textContent = `KSh ${numberFormat.format(dailyRevenue.expected_revenue_kes)}`;
-        status.textContent = `Showing ${passengers.vehicle_id} on ${passengers.day}.`;
+        setMetric("boardings", numbers.format(passengers.boardings));
+        setMetric("alightings", numbers.format(passengers.alightings));
+        setMetric("journeys", numbers.format(revenue.completed_journeys));
+        setMetric("expected", formatKes(revenue.expected_revenue_kes));
+
+        const declared = revenue.declared_collections_kes;
+        setMetric("declared", declared === null ? "Not declared" : formatKes(declared));
+        setMetric("variance", formatVariance(revenue.variance_kes));
+        status.textContent = `Showing ${revenue.vehicle_id} on ${revenue.day}.`;
       } catch (error) {
         status.textContent = `Could not load the summary. ${error.message}`;
       } finally {
