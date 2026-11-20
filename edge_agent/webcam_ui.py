@@ -190,6 +190,13 @@ class WebcamRuntime:
                         self.error = ""
                     except RuntimeError as error:
                         self.error = str(error)
+                        event["sync_reason"] = f"Could not send to Radar: {error}"
+                elif not trip:
+                    event["sync_reason"] = "Not sent: no active trip"
+                elif not trip.get("current_stage_id"):
+                    event["sync_reason"] = "Not sent: conductor must select the current route stage"
+                else:
+                    event["sync_reason"] = "Not sent: camera event publisher is unavailable"
                 if event_type == "boarding":
                     self.boardings += 1
                 else:
