@@ -24,7 +24,7 @@ API_URL = os.getenv("PSV_RADAR_API_URL", "http://localhost:8000")
 DEVICE_ID = os.getenv("PSV_CAMERA_DEVICE_ID", "")
 DEVICE_TOKEN = os.getenv("PSV_CAMERA_DEVICE_TOKEN", "")
 MODEL_PATH = os.getenv("PSV_CAMERA_MODEL", "yolo11n.pt")
-DASHBOARD_URL = os.getenv("PSV_RADAR_DASHBOARD_URL", "http://localhost:5173")
+DASHBOARD_URL = os.getenv("PSV_RADAR_DASHBOARD_URL", "https://psv-radar.up.railway.app/")
 MAX_FRAME_BYTES = 2_000_000
 # When set (always set it on a public deployment), every route except /health
 # requires HTTP Basic auth with this password and any username.
