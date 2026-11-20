@@ -51,6 +51,39 @@ The real camera adapter should emit one event per line crossing, use a stable
 `event_id` for retries, keep `track_id` local to the camera view, and never
 send video or face data to the backend.
 
+feat/yolo-edge-detector
+## Live detection with YOLO
+
+`edge_agent/yolo_detector.py` tracks people with Ultralytics YOLO and publishes
+one event each time a tracked person crosses a virtual line. Install the
+detector dependencies on the camera device (not needed on the server):
+
+```bash
+pip install -r edge_agent/requirements.txt
+```
+
+Then run it from the repository root. `--source` is a camera index, an RTSP URL,
+or a video file. Start with `--dry-run` to print events without sending them:
+
+```bash
+python3 -m edge_agent.yolo_detector --dry-run \
+  --source 0 --stage-id stage-a \
+  --vehicle-id psv-starter-demo --trip-id trip-001 --route-id demo-route
+```
+
+For production, drop `--dry-run`, set `PSV_RADAR_API_URL` and the device
+credentials as described above.
+
+- The line is horizontal at the middle of the frame by default. Change it with
+  `--orientation vertical|horizontal` and `--line 0.0-1.0`.
+- By default, moving down (or right) counts as boarding and the opposite as
+  alighting. Use `--invert` if your camera faces the other way.
+- `--stage-id` is fixed for the run; restart at each stage until the agent reads
+  the stage from the trip.
+- Event ids are derived from trip, track and crossing number, so retries do not
+  double-count. Only crossing events are sent: no video, frames or faces.
+
+=======
 ## Laptop webcam prototype
 
 This optional prototype runs Ultralytics person detection and BoT-SORT tracking
@@ -97,3 +130,4 @@ no persistent offline queue yet. A local tracker ID is only a short-lived
 camera-view ID, not a guaranteed identity from boarding to alighting. Verify
 crossing direction and false detections using test clips before interpreting
 counts as operational figures.
+main
