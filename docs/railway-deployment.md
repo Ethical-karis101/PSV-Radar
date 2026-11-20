@@ -83,6 +83,23 @@ connect it to the first computer's camera or detector. The local console is a
 hackathon demo, not an unattended vehicle deployment or a replacement for the
 planned Android camera app.
 
+## Optional: hosted camera demo service
+
+For a short demo without a local install, deploy the webcam UI as a second
+Railway service from this repository. The browser sends camera frames to this
+service and YOLO runs on its CPU, so video frames leave the device: use it only
+with consent, and prefer the local console above otherwise.
+
+1. Create a service from this repository and set its Dockerfile path to
+   `Dockerfile.camera`. Give it a public domain (HTTPS is required for camera access).
+2. Set variables: `PSV_RADAR_API_URL` (the main service's HTTPS URL),
+   `PSV_CAMERA_DEVICE_ID`, `PSV_CAMERA_DEVICE_TOKEN` and `CAMERA_UI_PASSWORD`.
+   Without `CAMERA_UI_PASSWORD` the service is open to anyone.
+3. Open the service URL, sign in with any username and that password, then start the camera.
+
+The state is global, so one camera and one viewer per service. The image is
+about 2.5 GB and CPU inference may be slow; test it before presenting.
+
 ## Important operating note
 
 The current backend uses SQLite, which is appropriate for the single-service

@@ -1,0 +1,21 @@
+# Webcam demo service: browser sends frames here, YOLO runs on CPU.
+# Deploy as a second Railway service with Dockerfile path "Dockerfile.camera".
+FROM python:3.12-slim
+ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
+WORKDIR /app
+
+# OpenCV runtime libraries
+RUN apt-get update && apt-get install -y --no-install-recommends libgl1 libglib2.0-0 \
+    && rm -rf /var/lib/apt/lists/*
+
+# CPU-only PyTorch keeps the image far smaller than the default CUDA build
+RUN pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cpu
+COPY edge_agent/requirements-webcam.txt ./edge_agent/requirements-webcam.txt
+RUN pip install --no-cache-dir -r edge_agent/requirements-webcam.txt
+
+# Bake the model in so the first request does not download it
+RUN python -c "from ultralytics import YOLO; YOLO('yolo11n.pt')"
+
+COPY edge_agent/ ./edge_agent/
+EXPOSE 8000
+CMD ["sh", "-c", "exec uvicorn edge_agent.webcam_ui:app --host 0.0.0.0 --port ${PORT:-8000}"]
