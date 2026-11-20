@@ -39,17 +39,28 @@ for the whole trip. When camera-local IDs differ, the backend uses a
 trip-scoped FIFO occupancy fallback and records `match_method:
 "fifo_occupancy"`. Low-confidence or impossible cases remain reviewable.
 
-The device or route service is responsible for mapping location to
-`stage_id`. Each round-trip direction should have its own `trip_id`.
+Each round-trip direction should have its own `trip_id`. For this MVP, the
+conductor selects the vehicle's current route stage from their own phone while
+the trip is active (`PUT /operations/trips/{trip_id}/stage`). The camera app
+reads that stage from `POST /device/active-trip`; it must attach the latest
+`current_stage_id` to each crossing event as `stage_id`. It should refresh the
+active-trip context regularly and immediately before publishing a crossing so
+stage changes made by the conductor reach the camera without handling the
+camera phone. This is an operator-provided stage, not GPS-derived stop
+detection; the event review queue remains the safeguard for mistakes.
 
-## Camera session authentication
+## Camera session authentication and Android duty flow
 
-Camera events must use a short-lived session token:
+Camera events must use a short-lived session token. The following is the target
+workflow for the dedicated Android camera app:
 
 1. An owner provisions a device with `POST /operations/devices` and stores the returned device token securely on the camera device.
-2. An authenticated conductor or owner starts the trip.
-3. The edge agent exchanges its device ID and device token at `POST /device/session` with the trip ID.
-4. The edge agent sends the returned short-lived `session_token` with each camera event and refreshes it automatically when needed.
+2. At the start of a shift, the dedicated Android camera app is opened and the conductor taps **Start duty** while the app is visible. The app remains in a camera foreground service while on duty.
+3. The app calls `POST /device/active-trip` using its device ID and device token. The endpoint returns `waiting` when no trip is active for that vehicle, or the active trip, `current_stage_id`, `current_stage_name`, ordered route stages, and camera door when one is active.
+4. An authenticated conductor creates and starts the trip from their own phone, then updates the current route stage as the vehicle progresses. The camera app polls for the active trip and exchanges its device credentials at `POST /device/session` with the discovered trip ID.
+5. The edge agent sends the returned short-lived `session_token` with each camera event and refreshes it automatically when needed. After the trip ends, the app returns to waiting; it stops camera processing at end of duty.
+
+The device credential is a long-lived secret: store it in Android Keystore-backed storage, never in a QR code that can be photographed or in routine conductor-facing screens. No video should be uploaded or retained; publish event metadata only.
 
 The authenticated-user endpoint `POST /operations/trips/{trip_id}/camera-session` remains available for dashboard/manual testing, but operators should not copy tokens during normal camera operation.
 

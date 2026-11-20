@@ -32,9 +32,12 @@ different origins.
 ## First launch
 
 The database schema initializes when the service starts. Register the first
-owner at `/register`, then create the routes, vehicles, fare rules, and conductor
-accounts for your operation. The local development database is deliberately
-excluded from the Docker image; no local demo or personal records are deployed.
+owner at `/register`, then prepare routes, vehicles, fare rules, camera devices,
+and conductor accounts for your operation. Conductors sign in on the conductor
+dashboard and create their own trip using a prepared vehicle; they can then start
+the run and submit its collection at handover. The local development database is
+deliberately excluded from the Docker image; no local demo or personal records
+are deployed.
 
 ## Important operating note
 
