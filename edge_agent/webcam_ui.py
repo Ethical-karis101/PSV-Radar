@@ -1,5 +1,6 @@
 """Local browser UI and inference API for a controlled PSV-Radar webcam demo."""
 
+import base64
 import json
 import os
 import secrets
@@ -11,7 +12,7 @@ from pathlib import Path
 from threading import Lock
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
@@ -25,6 +26,9 @@ DEVICE_TOKEN = os.getenv("PSV_CAMERA_DEVICE_TOKEN", "")
 MODEL_PATH = os.getenv("PSV_CAMERA_MODEL", "yolo11n.pt")
 DASHBOARD_URL = os.getenv("PSV_RADAR_DASHBOARD_URL", "http://localhost:5173")
 MAX_FRAME_BYTES = 2_000_000
+# When set (always set it on a public deployment), every route except /health
+# requires HTTP Basic auth with this password and any username.
+UI_PASSWORD = os.getenv("CAMERA_UI_PASSWORD", "")
 
 
 class CameraConfig(BaseModel):
@@ -218,6 +222,28 @@ class WebcamRuntime:
 
 runtime = WebcamRuntime()
 app = FastAPI(title="PSV-Radar local webcam demo")
+
+
+@app.middleware("http")
+async def require_password(request: Request, call_next):
+    if not UI_PASSWORD or request.url.path == "/health":
+        return await call_next(request)
+    supplied = ""
+    header = request.headers.get("authorization", "")
+    if header.lower().startswith("basic "):
+        try:
+            supplied = base64.b64decode(header[6:]).decode().partition(":")[2]
+        except ValueError:
+            supplied = ""
+    if not secrets.compare_digest(supplied.encode(), UI_PASSWORD.encode()):
+        return JSONResponse({"detail": "Authentication required."}, status_code=401,
+                            headers={"WWW-Authenticate": 'Basic realm="PSV-Radar camera"'})
+    return await call_next(request)
+
+
+@app.get("/health")
+def health():
+    return {"status": "ok"}
 
 
 @app.get("/", response_class=HTMLResponse)
