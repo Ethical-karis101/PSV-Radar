@@ -92,7 +92,8 @@ def initialize_database():
                     direction TEXT NOT NULL CHECK (direction IN ('outbound', 'return')),
                     conductor_id TEXT REFERENCES conductors(conductor_id),
                     status TEXT NOT NULL CHECK (status IN ('scheduled', 'active', 'ended', 'reconciled')),
-                    started_at TEXT, ended_at TEXT, created_at TEXT NOT NULL
+                    started_at TEXT, ended_at TEXT, created_at TEXT NOT NULL,
+                    current_stage_id TEXT
                 );
                 CREATE TABLE IF NOT EXISTS review_cases (
                     case_id TEXT PRIMARY KEY, trip_id TEXT REFERENCES trips(trip_id),
@@ -137,6 +138,10 @@ def initialize_database():
             }
             if "user_id" not in conductor_columns:
                 connection.execute("ALTER TABLE conductors ADD COLUMN user_id TEXT")
+
+            trip_columns = {row[1] for row in connection.execute("PRAGMA table_info(trips)")}
+            if "current_stage_id" not in trip_columns:
+                connection.execute("ALTER TABLE trips ADD COLUMN current_stage_id TEXT")
 
 
 def save_event(event_id, vehicle_id, event_type, occurred_at, track_id=None,

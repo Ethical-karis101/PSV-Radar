@@ -55,18 +55,59 @@ class DeviceSessionRequest(BaseModel):
     trip_id: str = Field(min_length=1, max_length=80)
 
 
+class DeviceStatusRequest(BaseModel):
+    device_id: str = Field(min_length=1, max_length=80)
+    device_token: str = Field(min_length=20, max_length=200)
+
+
+def _authenticated_device(connection, device_id, device_token):
+    device = connection.execute(
+        "SELECT * FROM camera_devices WHERE device_id = ? AND active = 1",
+        (device_id,),
+    ).fetchone()
+    if device is None or not secrets.compare_digest(
+        device["token_hash"], token_hash(device_token)
+    ):
+        raise HTTPException(status_code=401, detail="Device credential is invalid.")
+    return device
+
+
+@router.post("/active-trip")
+def get_device_active_trip(request: DeviceStatusRequest):
+    """Return only the active trip attached to the authenticated device's vehicle."""
+    with closing(db()) as connection:
+        device = _authenticated_device(connection, request.device_id, request.device_token)
+        trips = connection.execute(
+            """SELECT t.trip_id, t.route_id, t.direction, t.started_at,
+                      t.current_stage_id,
+                      cs.name AS current_stage_name,
+                      r.name AS route_name, r.origin, r.destination
+               FROM trips t JOIN routes r ON r.route_id = t.route_id
+               LEFT JOIN route_stages cs ON cs.route_id = t.route_id AND cs.stage_id = t.current_stage_id
+               WHERE t.vehicle_id = ? AND t.status = 'active'
+               ORDER BY t.started_at DESC LIMIT 2""",
+            (device["vehicle_id"],),
+        ).fetchall()
+        if len(trips) > 1:
+            raise HTTPException(status_code=409, detail="Multiple active trips exist for this vehicle.")
+        if not trips:
+            return {"state": "waiting", "device_id": device["device_id"],
+                    "vehicle_id": device["vehicle_id"], "door_id": device["door_id"]}
+        trip = dict(trips[0])
+        trip["stages"] = [dict(row) for row in connection.execute(
+            """SELECT stage_id, name, stage_order FROM route_stages
+               WHERE route_id = ? ORDER BY stage_order""",
+            (trip["route_id"],),
+        ).fetchall()]
+    return {"state": "active_trip", "device_id": device["device_id"],
+            "vehicle_id": device["vehicle_id"], "door_id": device["door_id"], "trip": trip}
+
+
 @router.post("/session")
 def create_device_session(request: DeviceSessionRequest):
     """Exchange a provisioned device credential for a trip-scoped session."""
     with db() as connection:
-        device = connection.execute(
-            "SELECT * FROM camera_devices WHERE device_id = ? AND active = 1",
-            (request.device_id,),
-        ).fetchone()
-        if device is None or not secrets.compare_digest(
-            device["token_hash"], token_hash(request.device_token)
-        ):
-            raise HTTPException(status_code=401, detail="Device credential is invalid.")
+        device = _authenticated_device(connection, request.device_id, request.device_token)
 
         trip = connection.execute(
             "SELECT trip_id, vehicle_id, status FROM trips WHERE trip_id = ?",

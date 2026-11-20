@@ -50,3 +50,50 @@ python3 -m edge_agent.agent --dry-run \
 The real camera adapter should emit one event per line crossing, use a stable
 `event_id` for retries, keep `track_id` local to the camera view, and never
 send video or face data to the backend.
+
+## Laptop webcam prototype
+
+This optional prototype runs Ultralytics person detection and BoT-SORT tracking
+against a local webcam, then publishes virtual-line crossings through the same
+event publisher and device APIs. It is for controlled testing with consenting
+participants, not unattended vehicle use. It does not record or upload video.
+
+Install the optional dependencies (prefer a virtual environment):
+
+```bash
+python3 -m pip install -r edge_agent/requirements-webcam.txt
+```
+
+The first run downloads the pretrained `yolo11n.pt` model. Start the backend,
+configure/provision a camera device and route, then start and stage an active
+trip from the conductor dashboard. On the laptop:
+
+```bash
+PSV_RADAR_API_URL='http://localhost:8000' \
+PSV_CAMERA_DEVICE_ID='cam-1' \
+PSV_CAMERA_DEVICE_TOKEN='device-token-from-provisioning' \
+python3 -m edge_agent.webcam --camera 0 \
+  --line 0.5,0.1,0.5,0.9 --boarding-direction positive
+```
+
+The line uses normalized frame coordinates (`x1,y1,x2,y2`); tune it to the
+visible door threshold. A crossing from the negative side to the positive side
+is boarding by default. Set `--boarding-direction negative` if the camera view
+is reversed. Press `q` to stop. If the laptop webcam is not index 0, try
+`--camera 1`.
+
+To test detection and crossing payloads without a backend or device credential:
+
+```bash
+python3 -m edge_agent.webcam --dry-run \
+  --vehicle-id demo-vehicle --trip-id demo-trip --route-id demo-route \
+  --stage-id stage-a --line 0.5,0.1,0.5,0.9
+```
+
+The prototype polls the device's active-trip context and uses the conductor's
+latest stage when publishing. It skips events if no active trip or stage is
+available. Network retries are limited to immediate retry behavior; there is
+no persistent offline queue yet. A local tracker ID is only a short-lived
+camera-view ID, not a guaranteed identity from boarding to alighting. Verify
+crossing direction and false detections using test clips before interpreting
+counts as operational figures.

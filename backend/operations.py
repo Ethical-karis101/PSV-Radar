@@ -93,6 +93,10 @@ class TripRequest(BaseModel):
     conductor_id: str | None = None
 
 
+class TripStageRequest(BaseModel):
+    stage_id: str = Field(min_length=1, max_length=80)
+
+
 class CameraDeviceRequest(BaseModel):
     device_id: str = Field(min_length=1, max_length=80)
     vehicle_id: str
@@ -201,14 +205,91 @@ def list_conductors():
     return {"conductors": [dict(row) for row in rows]}
 
 
-@router.post("/trips", status_code=201, dependencies=[Depends(require_owner)])
-def create_trip(request: TripRequest):
+@router.get("/trip-options")
+def trip_options(user=Depends(current_user)):
+    with closing(db()) as connection:
+        if user["role"] != "conductor":
+            raise HTTPException(403, "Trip setup is available from a conductor account.")
+        conductor = connection.execute(
+            "SELECT conductor_id FROM conductors WHERE user_id = ? AND active = 1",
+            (user["user_id"],),
+        ).fetchone()
+        if conductor is None:
+            raise HTTPException(403, "Your conductor profile is not active. Contact the PSV owner.")
+        rows = connection.execute(
+            """SELECT DISTINCT v.vehicle_id, v.registration, r.route_id, r.name AS route_name,
+                      r.origin, r.destination
+               FROM camera_devices d JOIN vehicles v ON v.vehicle_id = d.vehicle_id
+               JOIN routes r ON r.route_id = v.route_id
+               WHERE d.organization_id = ? AND d.active = 1 AND v.active = 1 AND r.active = 1
+                 AND NOT EXISTS (SELECT 1 FROM trips t WHERE t.vehicle_id = v.vehicle_id
+                                 AND t.status IN ('scheduled', 'active'))
+               ORDER BY v.registration""",
+            (user["organization_id"],),
+        ).fetchall()
+    return {"vehicles": [dict(row) for row in rows]}
+
+
+@router.post("/trips", status_code=201)
+def create_trip(request: TripRequest, user=Depends(current_user)):
     with db() as connection:
+        conductor_id = request.conductor_id
+        if user["role"] == "conductor":
+            connection.execute("BEGIN IMMEDIATE")
+            conductor = connection.execute(
+                "SELECT conductor_id FROM conductors WHERE user_id = ? AND active = 1",
+                (user["user_id"],),
+            ).fetchone()
+            if conductor is None:
+                raise HTTPException(403, "Your conductor profile is not active. Contact the PSV owner.")
+            conductor_id = conductor["conductor_id"]
+            vehicle = connection.execute(
+                """SELECT v.route_id FROM vehicles v JOIN camera_devices d ON d.vehicle_id = v.vehicle_id
+                   JOIN routes r ON r.route_id = v.route_id
+                   WHERE v.vehicle_id = ? AND v.active = 1 AND r.active = 1
+                     AND d.organization_id = ? AND d.active = 1""",
+                (request.vehicle_id, user["organization_id"]),
+            ).fetchone()
+            if vehicle is None or vehicle["route_id"] != request.route_id:
+                raise HTTPException(403, "Choose a vehicle and route prepared for your operation.")
+            conflict = connection.execute(
+                """SELECT 1 FROM trips WHERE status IN ('scheduled', 'active')
+                   AND (conductor_id = ? OR vehicle_id = ?) LIMIT 1""",
+                (conductor_id, request.vehicle_id),
+            ).fetchone()
+            if conflict:
+                raise HTTPException(409, "You or this vehicle already have an open trip.")
+        elif conductor_id:
+            assignment = connection.execute(
+                """SELECT 1 FROM conductors c JOIN users u ON u.user_id = c.user_id
+                   WHERE c.conductor_id = ? AND u.organization_id = ? AND c.active = 1""",
+                (conductor_id, user["organization_id"]),
+            ).fetchone()
+            if assignment is None:
+                raise HTTPException(403, "The selected conductor is outside your organization or inactive.")
+        if user["role"] == "owner":
+            vehicle = connection.execute(
+                """SELECT v.route_id FROM vehicles v JOIN camera_devices d ON d.vehicle_id = v.vehicle_id
+                   WHERE v.vehicle_id = ? AND v.active = 1 AND d.organization_id = ? AND d.active = 1""",
+                (request.vehicle_id, user["organization_id"]),
+            ).fetchone()
+            if vehicle is None or vehicle["route_id"] != request.route_id:
+                raise HTTPException(403, "Choose a vehicle and route prepared for your operation.")
+        stage_order = "ASC" if request.direction == "outbound" else "DESC"
+        initial_stage = connection.execute(
+            f"SELECT stage_id FROM route_stages WHERE route_id = ? ORDER BY stage_order {stage_order} LIMIT 1",
+            (request.route_id,),
+        ).fetchone()
+        if initial_stage is None:
+            raise HTTPException(422, "The selected route has no stages configured.")
         try:
             connection.execute(
-                "INSERT INTO trips VALUES (?, ?, ?, ?, ?, 'scheduled', NULL, NULL, ?)",
+                """INSERT INTO trips
+                   (trip_id, vehicle_id, route_id, direction, conductor_id, status,
+                    started_at, ended_at, created_at, current_stage_id)
+                   VALUES (?, ?, ?, ?, ?, 'scheduled', NULL, NULL, ?, ?)""",
                 (request.trip_id, request.vehicle_id, request.route_id, request.direction,
-                 request.conductor_id, now()),
+                 conductor_id, now(), initial_stage["stage_id"]),
             )
         except sqlite3.IntegrityError as error:
             raise HTTPException(422, "Vehicle, route, conductor, or trip is invalid.") from error
@@ -218,14 +299,41 @@ def create_trip(request: TripRequest):
 @router.post("/trips/{trip_id}/start")
 def start_trip(trip_id: str, user=Depends(current_user)):
     with db() as connection:
-        _authorized_trip(connection, trip_id, user)
+        trip = _authorized_trip(connection, trip_id, user)
+        stage_order = "ASC" if trip["direction"] == "outbound" else "DESC"
+        initial_stage = connection.execute(
+            f"SELECT stage_id FROM route_stages WHERE route_id = ? ORDER BY stage_order {stage_order} LIMIT 1",
+            (trip["route_id"],),
+        ).fetchone()
+        if initial_stage is None:
+            raise HTTPException(409, "The trip route has no stages configured.")
         result = connection.execute(
-            "UPDATE trips SET status = 'active', started_at = COALESCE(started_at, ?) WHERE trip_id = ? AND status = 'scheduled'",
-            (now(), trip_id),
+            """UPDATE trips SET status = 'active', started_at = COALESCE(started_at, ?),
+               current_stage_id = COALESCE(current_stage_id, ?) WHERE trip_id = ? AND status = 'scheduled'""",
+            (now(), initial_stage["stage_id"], trip_id),
         )
         if result.rowcount != 1:
             raise HTTPException(409, "Trip does not exist or is not scheduled.")
     return {"trip_id": trip_id, "status": "active"}
+
+
+@router.put("/trips/{trip_id}/stage")
+def update_trip_stage(trip_id: str, request: TripStageRequest, user=Depends(current_user)):
+    with db() as connection:
+        trip = _authorized_trip(connection, trip_id, user)
+        if trip["status"] != "active":
+            raise HTTPException(409, "The current stage can only be changed during an active trip.")
+        stage = connection.execute(
+            "SELECT stage_id, name FROM route_stages WHERE route_id = ? AND stage_id = ?",
+            (trip["route_id"], request.stage_id),
+        ).fetchone()
+        if stage is None:
+            raise HTTPException(422, "Choose a stage on this trip's route.")
+        connection.execute(
+            "UPDATE trips SET current_stage_id = ? WHERE trip_id = ? AND status = 'active'",
+            (stage["stage_id"], trip_id),
+        )
+    return {"trip_id": trip_id, "current_stage_id": stage["stage_id"], "current_stage_name": stage["name"]}
 
 
 @router.post("/devices", status_code=201)
@@ -304,7 +412,8 @@ def list_trips(status: str | None = Query(default=None), user=Depends(current_us
     query = """SELECT t.*, v.registration, r.name AS route_name, c.name AS conductor_name,
                       COALESCE((SELECT SUM(j.fare_kes) FROM completed_journeys j WHERE j.trip_id = t.trip_id), 0) AS expected_revenue_kes,
                       (SELECT COUNT(*) FROM passenger_events e WHERE e.trip_id = t.trip_id AND e.event_type = 'boarding') AS boardings_count,
-                      (SELECT cash_kes + mpesa_kes + other_kes FROM collection_declarations d WHERE d.trip_id = t.trip_id) AS declared_revenue_kes
+                      (SELECT cash_kes + mpesa_kes + other_kes FROM collection_declarations d WHERE d.trip_id = t.trip_id) AS declared_revenue_kes,
+                      (SELECT name FROM route_stages s WHERE s.route_id = t.route_id AND s.stage_id = t.current_stage_id) AS current_stage_name
                FROM trips t JOIN vehicles v ON v.vehicle_id = t.vehicle_id
                JOIN routes r ON r.route_id = t.route_id LEFT JOIN conductors c ON c.conductor_id = t.conductor_id"""
     conditions = []
@@ -323,7 +432,15 @@ def list_trips(status: str | None = Query(default=None), user=Depends(current_us
     query += " ORDER BY COALESCE(t.started_at, t.created_at) DESC"
     with closing(db()) as connection:
         rows = connection.execute(query, tuple(params)).fetchall()
-    return {"trips": [dict(row) for row in rows]}
+        trips = []
+        for row in rows:
+            trip = dict(row)
+            trip["stages"] = [dict(stage) for stage in connection.execute(
+                "SELECT stage_id, name, stage_order FROM route_stages WHERE route_id = ? ORDER BY stage_order",
+                (trip["route_id"],),
+            ).fetchall()]
+            trips.append(trip)
+    return {"trips": trips}
 
 
 def _fare(connection, route_id, boarding_stage, alighting_stage):

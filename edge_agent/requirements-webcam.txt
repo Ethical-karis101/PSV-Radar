@@ -1,0 +1,3 @@
+# Optional dependencies for the laptop webcam prototype; not needed by the API.
+ultralytics>=8.3,<9
+opencv-python>=4.10,<5

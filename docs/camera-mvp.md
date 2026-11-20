@@ -12,6 +12,14 @@ the door, and emits one event when a person crosses the virtual line.
 4. Conductor-selected trip and stage context.
 5. `POST /events` with metadata only; do not upload video in the MVP.
 
+The repository now includes an experimental laptop webcam adapter at
+`edge_agent/webcam.py`. It uses Ultralytics person detections, BoT-SORT local
+tracking, a configurable virtual line, active-trip context from the device API,
+and the existing event publisher. Install its optional dependencies from
+`edge_agent/requirements-webcam.txt`; the standard backend dependencies remain
+unchanged. This prototype is a controlled validation tool, not the Android
+deployment app, and it does not yet persist events through network outages.
+
 The tracker ID is local to the camera view. It is not a permanent passenger
 identity and should not be used to join a boarding event to a later alighting
 event. The backend falls back to trip-scoped FIFO occupancy matching when the
