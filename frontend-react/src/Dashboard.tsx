@@ -4,11 +4,12 @@ import './Dashboard.css'
 import './FleetRoutes.css'
 
 const API = import.meta.env.VITE_API_URL ?? (import.meta.env.PROD ? window.location.origin : 'http://localhost:8000')
-type View = 'overview' | 'trips' | 'vehicles' | 'conductors' | 'reviews'
+type View = 'overview' | 'trips' | 'vehicles' | 'conductors' | 'reviews' | 'cameras'
 type Summary = { trips: number; expected_revenue_kes: number; declared_revenue_kes: number; variance_kes: number; open_review_cases: number; boardings: number }
 type Trip = { trip_id: string; registration: string; route_name: string; direction: string; conductor_name?: string; status: string; expected_revenue_kes: number; declared_revenue_kes?: number }
 type Review = { case_id: string; reason: string; registration?: string; route_name?: string; created_at: string; status?: string; event_id?: string; note?: string }
 type Vehicle = { vehicle_id: string; registration: string; route_id?: string; route_name?: string; active: number }
+type CameraDevice = { device_id: string; vehicle_id: string; door_id: string; name: string; active: number; online: boolean; last_seen_at?: string | null; last_event_at?: string | null; boardings_count: number; alightings_count: number }
 type Route = { route_id: string; name: string; origin: string; destination: string; stages?: { stage_id: string; name: string; stage_order: number }[] }
 type TrendDay = { day: string; expected_revenue_kes: number; completed_journeys: number; boardings: number }
 type User = { name: string; email: string }
@@ -30,6 +31,7 @@ export default function Dashboard() {
   const [reviews, setReviews] = useState<Review[]>([])
   const [vehicles, setVehicles] = useState<Vehicle[]>([])
   const [routes, setRoutes] = useState<Route[]>([])
+  const [devices, setDevices] = useState<CameraDevice[]>([])
   const [user, setUser] = useState<User | null>(null)
   const [connected, setConnected] = useState(false)
   const [loading, setLoading] = useState(true)
@@ -39,13 +41,14 @@ export default function Dashboard() {
     setLoading(true)
     setError('')
     try {
-      const [me, nextSummary, nextTrips, nextReviews, nextVehicles, nextRoutes] = await Promise.all([
+      const [me, nextSummary, nextTrips, nextReviews, nextVehicles, nextRoutes, nextDevices] = await Promise.all([
         getJson<{ user: User }>('/auth/me'), getJson<Summary>('/operations/summary'),
         getJson<{ trips: Trip[] }>('/operations/trips'), getJson<{ reviews: Review[] }>('/operations/reviews'),
         getJson<{ vehicles: Vehicle[] }>('/operations/vehicles'), getJson<{ routes: Route[] }>('/operations/routes'),
+        getJson<{ devices: CameraDevice[] }>('/operations/devices'),
       ])
       setUser(me.user); setSummary(nextSummary); setTrips(nextTrips.trips); setReviews(nextReviews.reviews)
-      setVehicles(nextVehicles.vehicles); setRoutes(nextRoutes.routes); setConnected(true)
+      setVehicles(nextVehicles.vehicles); setRoutes(nextRoutes.routes); setDevices(nextDevices.devices); setConnected(true)
     } catch (requestError) {
       setConnected(false); setError(requestError instanceof Error ? requestError.message : 'Could not load operational data.')
     } finally { setLoading(false) }
@@ -77,7 +80,7 @@ export default function Dashboard() {
   return <div className="app-shell"><Sidebar active={view} onNavigate={navigate} onSignOut={signOut} /><main className="dashboard-main"><div className="mobile-top"><Brand /></div>
     <header className="dashboard-header"><div><p className="eyebrow">{new Date().toLocaleDateString('en-KE', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</p><h1>{viewTitle(view)}</h1><p className="header-sub">{user ? `Habari, ${user.name}. Here’s what’s happening across your fleet.` : 'Your fleet, trips and collections in one place.'}</p></div><div className="header-tools"><span className={`connection ${connected ? 'online' : ''}`}><i /> {connected ? 'Up to date' : 'Offline'}</span><button className="icon-button" onClick={() => void load()} aria-label="Refresh data">↻</button><span className="dashboard-avatar">{initials(user?.name ?? 'Owner')}</span></div></header>
     {error && <div className="data-error" role="alert"><strong>Live data unavailable.</strong> {error}<button onClick={() => void load()}>Retry</button></div>}
-    {loading ? <div className="loading-state"><span className="status-dot" /> Loading operational data…</div> : <>{view === 'overview' && <Overview summary={summary} trips={trips} reviews={reviews} vehicles={vehicles} onNavigate={navigate} />}{view === 'trips' && <TripsView trips={trips} />}{view === 'vehicles' && <VehiclesView vehicles={vehicles} routes={routes} onSaved={load} />}{view === 'conductors' && <ConductorsView />}{view === 'reviews' && <ReviewsView reviews={reviews} onResolve={resolveReview} />}</>}
+    {loading ? <div className="loading-state"><span className="status-dot" /> Loading operational data…</div> : <>{view === 'overview' && <Overview summary={summary} trips={trips} reviews={reviews} vehicles={vehicles} onNavigate={navigate} />}{view === 'trips' && <TripsView trips={trips} />}{view === 'vehicles' && <VehiclesView vehicles={vehicles} routes={routes} onSaved={load} />}{view === 'conductors' && <ConductorsView />}{view === 'reviews' && <ReviewsView reviews={reviews} onResolve={resolveReview} />}{view === 'cameras' && <CamerasView devices={devices} vehicles={vehicles} />}</>}
     <MobileNav active={view} onNavigate={navigate} />
   </main></div>
 }
@@ -95,6 +98,55 @@ function Overview({ summary, trips, reviews, vehicles, onNavigate }: { summary: 
 }
 
 function TripsView({ trips }: { trips: Trip[] }) { const [status, setStatus] = useState('all'); const filtered = status === 'all' ? trips : trips.filter((trip) => trip.status === status); return <section className="panel full-panel"><div className="view-heading"><div><p className="eyebrow">Operations</p><h2>Trips</h2><p>Review every run, conductor, expected fare, and collection variance.</p></div><select className="filter-select" value={status} onChange={(event) => setStatus(event.target.value)} aria-label="Filter trips"><option value="all">All statuses</option><option value="active">Active</option><option value="scheduled">Scheduled</option><option value="ended">Ended</option></select></div><TripTable trips={filtered} empty="No trips match this filter." /></section> }
+
+function CamerasView({ devices, vehicles }: { devices: CameraDevice[]; vehicles: Vehicle[] }) {
+  const [refreshedItems, setRefreshedItems] = useState<CameraDevice[] | null>(null)
+  const [deviceId, setDeviceId] = useState('')
+  const [vehicleId, setVehicleId] = useState('')
+  const [deviceName, setDeviceName] = useState('Dedicated camera')
+  const [deviceToken, setDeviceToken] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [formError, setFormError] = useState('')
+  const items = refreshedItems ?? devices
+  useEffect(() => {
+    let mounted = true
+    const refresh = async () => {
+      try { const result = await getJson<{ devices: CameraDevice[] }>('/operations/devices'); if (mounted) setRefreshedItems(result.devices) }
+      catch { /* Keep the last known camera state visible during temporary network loss. */ }
+    }
+    const timer = window.setInterval(() => void refresh(), 5000)
+    return () => { mounted = false; window.clearInterval(timer) }
+  }, [])
+  async function provisionDevice(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault(); setBusy(true); setFormError(''); setDeviceToken('')
+    try {
+      const response = await fetch(`${API}/operations/devices`, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ device_id: deviceId.trim(), vehicle_id: vehicleId, door_id: 'main-door', name: deviceName.trim() }) })
+      const payload = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(payload.detail ?? 'Could not provision camera device.')
+      setDeviceToken(payload.device_token); setDeviceId(''); setRefreshedItems(null)
+    } catch (error) { setFormError(error instanceof Error ? error.message : 'Could not provision camera device.') }
+    finally { setBusy(false) }
+  }
+  const onlineCount = items.filter((item) => item.online).length
+  return <section className="panel full-panel cameras-panel">
+    <div className="view-heading"><div><p className="eyebrow">Edge devices</p><h2>Camera monitor</h2><p>Camera health and crossing events update while a demo agent is running.</p></div><span className="count-badge">{onlineCount} online · {items.length} total</span></div>
+    <form className="owner-form camera-setup-form" onSubmit={(event) => void provisionDevice(event)}>
+      <label>Device ID<input required value={deviceId} onChange={(event) => setDeviceId(event.target.value)} placeholder="e.g. camera-matatu-01" /></label>
+      <label>Vehicle<select required value={vehicleId} onChange={(event) => setVehicleId(event.target.value)}><option value="">Choose a vehicle</option>{vehicles.map((vehicle) => <option key={vehicle.vehicle_id} value={vehicle.vehicle_id}>{vehicle.registration}</option>)}</select></label>
+      <label>Camera name<input required value={deviceName} onChange={(event) => setDeviceName(event.target.value)} /></label>
+      <button className="primary-action" type="submit" disabled={busy || vehicles.length === 0}>{busy ? 'Setting up…' : 'Add camera'}</button>
+    </form>
+    {formError && <p className="camera-form-error" role="alert">{formError}</p>}
+    {deviceToken && <div className="camera-token-notice" role="status"><strong>Camera added. Copy this device token now—it will not be shown again.</strong><code>{deviceToken}</code><small>Use this value as PSV_CAMERA_DEVICE_TOKEN on the camera computer.</small></div>}
+    {items.length === 0 ? <div className="camera-empty"><strong>No camera devices yet</strong><p>Add a camera above, save its one-time token securely, then run the local webcam demo agent.</p></div> : <div className="camera-device-list">{items.map((device) => <article className="camera-device-card" key={device.device_id}>
+      <div className="camera-device-heading"><span className={`camera-health-dot ${device.online ? 'online' : ''}`} /><div><strong>{device.name}</strong><span>{device.device_id} · {device.door_id}</span></div><em className={device.online ? 'online' : ''}>{device.online ? 'Online' : device.active ? 'Offline' : 'Disabled'}</em></div>
+      <p className="camera-vehicle">Vehicle <strong>{device.vehicle_id}</strong></p>
+      <div className="camera-event-stats"><span><strong>{device.boardings_count.toLocaleString('en-KE')}</strong> boardings</span><span><strong>{device.alightings_count.toLocaleString('en-KE')}</strong> alightings</span></div>
+      <small className="camera-last-seen">{device.online ? 'Last heartbeat' : 'Last seen'}: {device.last_seen_at ? formatTime(device.last_seen_at) : 'No heartbeat received yet'}{device.last_event_at ? ` · Last crossing ${formatTime(device.last_event_at)}` : ''}</small>
+    </article>)}</div>}
+    <p className="camera-monitor-note">The dashboard receives event metadata and camera health only—no live video is uploaded.</p>
+  </section>
+}
 
 function VehiclesView({ vehicles, routes, onSaved }: { vehicles: Vehicle[]; routes: Route[]; onSaved: () => Promise<void> }) {
   const [routeName, setRouteName] = useState('')
@@ -271,12 +323,12 @@ function ReviewList({ reviews, onResolve, compact = false }: { reviews: Review[]
 function TripTable({ trips, empty = 'No trips recorded yet.' }: { trips: Trip[]; empty?: string }) { if (trips.length === 0) return <p className="empty-state">{empty}</p>; return <div className="trip-table"><div className="trip-table-head"><span>VEHICLE & ROUTE</span><span>CONDUCTOR</span><span>EXPECTED FARES</span><span>DIFFERENCE</span><span>TRIP STATUS</span></div>{trips.map((trip) => { const variance = trip.declared_revenue_kes == null ? null : trip.declared_revenue_kes - trip.expected_revenue_kes; return <div className="trip-table-row" key={trip.trip_id}><div><strong>{trip.registration}</strong><span>{trip.route_name} · {trip.direction === 'return' ? 'return leg' : 'outbound leg'}</span><small>{trip.trip_id}</small></div><span>{trip.conductor_name ?? 'Not assigned'}</span><strong>{money(trip.expected_revenue_kes)}</strong><span className={variance != null && variance < 0 ? 'negative' : 'positive'}>{variance == null ? 'Awaiting collection' : signedMoney(variance)}</span><span className={`status-pill ${trip.status}`}>{trip.status === 'active' ? 'On route' : trip.status === 'ended' ? 'Trip ended' : trip.status}</span></div> })}</div> }
 
 function Metric({ label, value, note, tone }: { label: string; value: string; note: string; tone: string }) { return <article className={`dash-metric ${tone}`}><span>{label}</span><strong>{value}</strong><small><b>↗</b> {note}</small></article> }
-function Sidebar({ active, onNavigate, onSignOut }: { active: View; onNavigate: (view: View) => void; onSignOut: () => void }) { return <aside className="sidebar"><Brand /><nav aria-label="Owner workspace"><span className="side-label">Workspace</span><NavButton active={active === 'overview'} onClick={() => onNavigate('overview')} icon="⌂">Overview</NavButton><NavButton active={active === 'trips'} onClick={() => onNavigate('trips')} icon="↗">Trips</NavButton><NavButton active={active === 'vehicles'} onClick={() => onNavigate('vehicles')} icon="▣">Vehicles</NavButton><NavButton active={active === 'conductors'} onClick={() => onNavigate('conductors')} icon="◉">Conductors</NavButton><NavButton active={active === 'reviews'} onClick={() => onNavigate('reviews')} icon="!">Reviews</NavButton></nav><span className="side-label second">Manage</span><div className="sidebar-bottom"><span className="help-dot">?</span><div><strong>Needs attention?</strong><small>Review uncertain journeys</small></div></div><button className="sign-out" onClick={onSignOut}>Sign out</button></aside> }
+function Sidebar({ active, onNavigate, onSignOut }: { active: View; onNavigate: (view: View) => void; onSignOut: () => void }) { return <aside className="sidebar"><Brand /><nav aria-label="Owner workspace"><span className="side-label">Workspace</span><NavButton active={active === 'overview'} onClick={() => onNavigate('overview')} icon="⌂">Overview</NavButton><NavButton active={active === 'trips'} onClick={() => onNavigate('trips')} icon="↗">Trips</NavButton><NavButton active={active === 'vehicles'} onClick={() => onNavigate('vehicles')} icon="▣">Vehicles</NavButton><NavButton active={active === 'cameras'} onClick={() => onNavigate('cameras')} icon="◉">Cameras</NavButton><NavButton active={active === 'conductors'} onClick={() => onNavigate('conductors')} icon="♙">Conductors</NavButton><NavButton active={active === 'reviews'} onClick={() => onNavigate('reviews')} icon="!">Reviews</NavButton></nav><span className="side-label second">Manage</span><div className="sidebar-bottom"><span className="help-dot">?</span><div><strong>Needs attention?</strong><small>Review uncertain journeys</small></div></div><button className="sign-out" onClick={onSignOut}>Sign out</button></aside> }
 function NavButton({ active, onClick, icon, children }: { active: boolean; onClick: () => void; icon: string; children: string }) { return <button className={`side-link side-button ${active ? 'active' : ''}`} onClick={onClick} aria-current={active ? 'page' : undefined}><i aria-hidden="true">{icon}</i>{children}</button> }
-function MobileNav({ active, onNavigate }: { active: View; onNavigate: (view: View) => void }) { const items: { id: View; label: string; icon: string }[] = [{ id: 'overview', label: 'Home', icon: '⌂' }, { id: 'trips', label: 'Trips', icon: '↗' }, { id: 'vehicles', label: 'Vehicles', icon: '▣' }, { id: 'conductors', label: 'Crew', icon: '◉' }, { id: 'reviews', label: 'Review', icon: '!' }]; return <nav className="mobile-dashboard-nav" aria-label="Owner dashboard sections">{items.map((item) => <button key={item.id} className={active === item.id ? 'active' : ''} onClick={() => onNavigate(item.id)} aria-current={active === item.id ? 'page' : undefined} aria-label={item.id === active ? `${item.label}, current section` : item.label}><span aria-hidden="true">{item.icon}</span><small>{item.label}</small></button>)}</nav> }
+function MobileNav({ active, onNavigate }: { active: View; onNavigate: (view: View) => void }) { const items: { id: View; label: string; icon: string }[] = [{ id: 'overview', label: 'Home', icon: '⌂' }, { id: 'trips', label: 'Trips', icon: '↗' }, { id: 'vehicles', label: 'Vehicles', icon: '▣' }, { id: 'cameras', label: 'Cameras', icon: '◉' }, { id: 'conductors', label: 'Crew', icon: '♙' }, { id: 'reviews', label: 'Review', icon: '!' }]; return <nav className="mobile-dashboard-nav" aria-label="Owner dashboard sections">{items.map((item) => <button key={item.id} className={active === item.id ? 'active' : ''} onClick={() => onNavigate(item.id)} aria-current={active === item.id ? 'page' : undefined} aria-label={item.id === active ? `${item.label}, current section` : item.label}><span aria-hidden="true">{item.icon}</span><small>{item.label}</small></button>)}</nav> }
 function Brand() { return <a className="dashboard-brand" href="/dashboard"><span className="brand-mark"><span /></span> PSV<span>Radar</span></a> }
-function viewFromUrl(): View { const value = new URLSearchParams(window.location.search).get('view'); return value === 'trips' || value === 'vehicles' || value === 'conductors' || value === 'reviews' ? value : 'overview' }
-function viewTitle(view: View) { return view === 'overview' ? 'Your fleet today' : view === 'trips' ? 'Trip log' : view === 'vehicles' ? 'Your vehicles' : view === 'conductors' ? 'Your crew' : 'Trips to check' }
+function viewFromUrl(): View { const value = new URLSearchParams(window.location.search).get('view'); return value === 'trips' || value === 'vehicles' || value === 'conductors' || value === 'reviews' || value === 'cameras' ? value : 'overview' }
+function viewTitle(view: View) { return view === 'overview' ? 'Your fleet today' : view === 'trips' ? 'Trip log' : view === 'vehicles' ? 'Your vehicles' : view === 'conductors' ? 'Your crew' : view === 'cameras' ? 'Camera monitor' : 'Trips to check' }
 function initials(name: string) { return name.split(/\s+/).map((part) => part[0]).join('').slice(0, 2).toUpperCase() }
 function formatTime(value: string) { const date = new Date(value); return Number.isNaN(date.getTime()) ? value : date.toLocaleString('en-KE', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) }
 function slugify(value: string) { return value.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') }

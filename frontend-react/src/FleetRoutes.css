@@ -19,5 +19,36 @@
 .form-intro code{padding:2px 5px;border-radius:4px;color:#536a4d;background:#eff3e9;font-size:10px}
 .sr-only{position:absolute;width:1px;height:1px;padding:0;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
 .owner-form .primary-action:disabled{opacity:.55;cursor:not-allowed}
-@media(max-width:900px){.fleet-layout{grid-template-columns:minmax(0,1fr)}}
-@media(max-width:560px){.route-endpoints{grid-template-columns:1fr}.route-stops{padding:10px}.fare-rule-row{grid-template-columns:minmax(0,1fr) 12px minmax(0,1fr) 66px 30px;gap:4px}.fare-rule-row input,.fare-rule-row select{min-height:42px;padding:6px;font-size:11px}.fare-rule-row .remove-stop{width:30px;height:34px}.route-stops legend{max-width:100%;line-height:1.5}.route-stops legend .optional{margin-left:0}}
+.camera-device-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr));gap:12px}
+.camera-setup-form{grid-template-columns:repeat(3,minmax(0,1fr)) auto;align-items:end;gap:10px;margin:0 0 14px;padding:14px;border:1px solid #e3e8de;border-radius:9px;background:#fbfcf9}
+.camera-setup-form label{min-width:0}
+.camera-setup-form input,.camera-setup-form select{box-sizing:border-box;width:100%;min-height:42px;padding:9px 10px;border:1px solid #d7e2df;border-radius:7px;color:#17323d;background:#fff;font:inherit;font-size:12px}
+.camera-setup-form .primary-action{min-height:42px;white-space:nowrap}
+.camera-form-error{margin:0 0 12px;color:#a55e48;font-size:11px}
+.camera-token-notice{display:grid;gap:7px;margin-bottom:14px;padding:13px;border:1px solid #dbe8bf;border-radius:8px;background:#f5faec}
+.camera-token-notice strong{color:#47613f;font-size:11px}
+.camera-token-notice code{overflow-wrap:anywhere;color:#334c39;font-size:11px;user-select:all}
+.camera-token-notice small{color:#748174;font-size:10px}
+.camera-device-card{min-width:0;padding:16px;border:1px solid #e3e8de;border-radius:9px;background:#fbfcf9}
+.camera-device-heading{display:flex;align-items:center;gap:10px}
+.camera-device-heading>div{min-width:0;flex:1}
+.camera-device-heading strong,.camera-device-heading span{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.camera-device-heading strong{color:#34483c;font-size:12px}
+.camera-device-heading span{margin-top:4px;color:#869188;font-size:10px}
+.camera-device-heading em{padding:5px 8px;border-radius:12px;color:#946f39;background:#f7efdd;font-size:9px;font-style:normal;font-weight:700}
+.camera-device-heading em.online{color:#527b42;background:#edf4e5}
+.camera-health-dot{flex:0 0 auto;width:9px;height:9px;border-radius:50%;background:#d8a05b}
+.camera-health-dot.online{background:#69a45b;box-shadow:0 0 0 4px #69a45b1c}
+.camera-vehicle{margin:14px 0 10px;color:#879188;font-size:10px}
+.camera-vehicle strong{color:#53675a}
+.camera-event-stats{display:flex;gap:8px}
+.camera-event-stats span{flex:1;padding:10px;border-radius:7px;color:#78857c;background:#f0f3eb;font-size:9px}
+.camera-event-stats strong{display:block;margin-bottom:3px;color:#34483c;font-size:18px}
+.camera-last-seen{display:block;margin-top:11px;color:#89948b;font-size:9px;line-height:1.5}
+.camera-empty{padding:22px;border:1px dashed #dce4d8;border-radius:9px;background:#fbfcf9}
+.camera-empty strong{color:#425647;font-size:12px}
+.camera-empty p,.camera-monitor-note{color:#869188;font-size:10px;line-height:1.55}
+.camera-monitor-note{margin:16px 0 0}
+@media(max-width:900px){.fleet-layout{grid-template-columns:minmax(0,1fr)}.camera-setup-form{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:900px){.mobile-dashboard-nav{grid-template-columns:repeat(6,minmax(0,1fr))}}
+@media(max-width:560px){.route-endpoints{grid-template-columns:1fr}.route-stops{padding:10px}.fare-rule-row{grid-template-columns:minmax(0,1fr) 12px minmax(0,1fr) 66px 30px;gap:4px}.fare-rule-row input,.fare-rule-row select{min-height:42px;padding:6px;font-size:11px}.fare-rule-row .remove-stop{width:30px;height:34px}.route-stops legend{max-width:100%;line-height:1.5}.route-stops legend .optional{margin-left:0}.camera-setup-form{grid-template-columns:minmax(0,1fr)}.camera-setup-form input,.camera-setup-form select{min-height:44px;font-size:16px}}

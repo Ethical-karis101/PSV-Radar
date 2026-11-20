@@ -39,6 +39,50 @@ the run and submit its collection at handover. The local development database is
 deliberately excluded from the Docker image; no local demo or personal records
 are deployed.
 
+## Connect the local camera demo to Railway
+
+Deploy only the owner/conductor web app and API to Railway. The Railway
+container does not have access to a camera attached to your laptop or vehicle,
+so do not run the webcam detector inside the Railway service. The camera console
+and detector run on the computer physically connected to the webcam; they send
+crossing-event metadata and heartbeats to the public Railway API. Video frames
+stay on that local computer.
+
+1. Open the deployed app at its HTTPS Railway domain and sign in as the owner.
+2. In **Cameras**, add a device and assign it to the vehicle. Copy the displayed
+   device token immediately; it is shown only once. Prepare the vehicle's route
+   and have the conductor start a trip from the deployed conductor dashboard.
+3. On the computer connected to the webcam, from the repository root, install
+   the optional local detector dependencies:
+
+   ```bash
+   python3 -m pip install -r edge_agent/requirements-webcam.txt
+   ```
+
+4. Run the local camera console, replacing the Railway URL and device credentials:
+
+   ```bash
+   PSV_RADAR_API_URL='https://your-service.up.railway.app' \
+   PSV_RADAR_DASHBOARD_URL='https://your-service.up.railway.app' \
+   PSV_CAMERA_DEVICE_ID='camera-matatu-01' \
+   PSV_CAMERA_DEVICE_TOKEN='paste-the-one-time-token-here' \
+   python3 -m uvicorn edge_agent.webcam_ui:app --host 127.0.0.1 --port 8765
+   ```
+
+5. On that same computer, open `http://127.0.0.1:8765`, allow camera access,
+   position the virtual door line, and start the demo. The conductor updates the
+   current route stage from their deployed screen. The owner can watch device
+   heartbeat and event totals at `https://your-service.up.railway.app/dashboard?view=cameras`.
+
+The first detector launch downloads the `yolo11n.pt` model, so install the
+dependencies and warm the model before the presentation. Keep the device token
+private and do not store it in Railway variables: it is only needed by the local
+camera process. Run this supervised prototype on the same computer that has the
+webcam; opening the local console URL on a different phone or computer will not
+connect it to the first computer's camera or detector. The local console is a
+hackathon demo, not an unattended vehicle deployment or a replacement for the
+planned Android camera app.
+
 ## Important operating note
 
 The current backend uses SQLite, which is appropriate for the single-service

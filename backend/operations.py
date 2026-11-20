@@ -342,7 +342,9 @@ def create_camera_device(request: CameraDeviceRequest, owner=Depends(require_own
     with device_db() as connection:
         try:
             connection.execute(
-                "INSERT INTO camera_devices VALUES (?, ?, ?, ?, ?, ?, 1, ?)",
+                """INSERT INTO camera_devices
+                   (device_id, organization_id, vehicle_id, door_id, name, token_hash, active, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, 1, ?)""",
                 (request.device_id, owner["organization_id"], request.vehicle_id,
                  request.door_id, request.name, token_hash(raw_token), now()),
             )
@@ -356,11 +358,27 @@ def create_camera_device(request: CameraDeviceRequest, owner=Depends(require_own
 def list_camera_devices(user=Depends(current_user)):
     with closing(device_db()) as connection:
         rows = connection.execute(
-            """SELECT device_id, vehicle_id, door_id, name, active, created_at
-               FROM camera_devices WHERE organization_id = ? ORDER BY created_at DESC""",
+            """SELECT d.device_id, d.vehicle_id, d.door_id, d.name, d.active, d.created_at,
+                      d.last_seen_at,
+                      (SELECT MAX(e.occurred_at) FROM passenger_events e
+                       WHERE e.vehicle_id = d.vehicle_id AND e.door_id = d.door_id) AS last_event_at,
+                      (SELECT COUNT(*) FROM passenger_events e WHERE e.vehicle_id = d.vehicle_id
+                       AND e.door_id = d.door_id AND e.event_type = 'boarding') AS boardings_count,
+                      (SELECT COUNT(*) FROM passenger_events e WHERE e.vehicle_id = d.vehicle_id
+                       AND e.door_id = d.door_id AND e.event_type = 'alighting') AS alightings_count
+               FROM camera_devices d WHERE d.organization_id = ? ORDER BY d.created_at DESC""",
             (user["organization_id"],),
         ).fetchall()
-    return {"devices": [dict(row) for row in rows]}
+    devices = []
+    for row in rows:
+        device = dict(row)
+        try:
+            device["online"] = bool(device["active"] and device["last_seen_at"] and
+                                    (datetime.now(timezone.utc) - datetime.fromisoformat(device["last_seen_at"])).total_seconds() <= 45)
+        except (TypeError, ValueError):
+            device["online"] = False
+        devices.append(device)
+    return {"devices": devices}
 
 
 @router.post("/trips/{trip_id}/camera-session")

@@ -124,7 +124,8 @@ def initialize_database():
                     device_id TEXT PRIMARY KEY, organization_id TEXT NOT NULL REFERENCES organizations(organization_id),
                     vehicle_id TEXT NOT NULL REFERENCES vehicles(vehicle_id), door_id TEXT NOT NULL,
                     name TEXT NOT NULL, token_hash TEXT NOT NULL UNIQUE,
-                    active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)), created_at TEXT NOT NULL
+                    active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)), created_at TEXT NOT NULL,
+                    last_seen_at TEXT
                 );
                 CREATE TABLE IF NOT EXISTS camera_sessions (
                     session_id TEXT PRIMARY KEY, device_id TEXT NOT NULL REFERENCES camera_devices(device_id),
@@ -142,6 +143,10 @@ def initialize_database():
             trip_columns = {row[1] for row in connection.execute("PRAGMA table_info(trips)")}
             if "current_stage_id" not in trip_columns:
                 connection.execute("ALTER TABLE trips ADD COLUMN current_stage_id TEXT")
+
+            device_columns = {row[1] for row in connection.execute("PRAGMA table_info(camera_devices)")}
+            if "last_seen_at" not in device_columns:
+                connection.execute("ALTER TABLE camera_devices ADD COLUMN last_seen_at TEXT")
 
 
 def save_event(event_id, vehicle_id, event_type, occurred_at, track_id=None,

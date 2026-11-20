@@ -51,7 +51,46 @@ The real camera adapter should emit one event per line crossing, use a stable
 `event_id` for retries, keep `track_id` local to the camera view, and never
 send video or face data to the backend.
 
-## Laptop webcam prototype
+## Browser webcam demo (recommended for the MVP presentation)
+
+This runs a local, touch-friendly camera console in a browser. The local Python
+service runs person detection and tracking; the browser only previews the camera
+and displays boxes, the virtual door line, and crossing counts. Video frames stay
+on this machine. Only crossing-event metadata and a device heartbeat are sent to
+the backend. Bind the service to `127.0.0.1` so the local camera console is not
+exposed to the network.
+
+Install the optional dependencies (the first model run downloads `yolo11n.pt`):
+
+```bash
+python3 -m pip install -r edge_agent/requirements-webcam.txt
+```
+
+Start the backend, provision a camera device for the vehicle, and have the
+conductor create/start a trip. Then run this from the repository root, replacing
+the device credentials with the values returned at provisioning:
+
+```bash
+PSV_RADAR_API_URL='http://localhost:8000' \
+PSV_RADAR_DASHBOARD_URL='http://localhost:5173' \
+PSV_CAMERA_DEVICE_ID='cam-1' \
+PSV_CAMERA_DEVICE_TOKEN='device-token-from-provisioning' \
+python3 -m uvicorn edge_agent.webcam_ui:app --host 127.0.0.1 --port 8765
+```
+
+Open <http://127.0.0.1:8765> on the camera computer, allow camera access, and
+press **Start camera demo**. Adjust the door line so it crosses the visible
+threshold, and choose which direction means boarding. The console follows the
+active trip and the conductor-selected route stage automatically. The owner can
+watch the camera heartbeat and event totals in **Dashboard → Cameras**.
+
+The browser console is a controlled hackathon demonstration, not a production
+Android camera app: keep the computer attended, use consenting participants,
+and verify the camera angle and crossing direction before presenting. It does
+not record video, guarantee passenger identity across a trip, or maintain an
+offline event queue. The one-time device token must be kept private.
+
+## Laptop webcam CLI prototype
 
 This optional prototype runs Ultralytics person detection and BoT-SORT tracking
 against a local webcam, then publishes virtual-line crossings through the same

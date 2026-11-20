@@ -103,6 +103,19 @@ def get_device_active_trip(request: DeviceStatusRequest):
             "vehicle_id": device["vehicle_id"], "door_id": device["door_id"], "trip": trip}
 
 
+@router.post("/heartbeat")
+def device_heartbeat(request: DeviceStatusRequest):
+    """Record that an authenticated camera agent is running."""
+    with db() as connection:
+        device = _authenticated_device(connection, request.device_id, request.device_token)
+        seen_at = now().isoformat()
+        connection.execute(
+            "UPDATE camera_devices SET last_seen_at = ? WHERE device_id = ?",
+            (seen_at, device["device_id"]),
+        )
+    return {"device_id": request.device_id, "last_seen_at": seen_at}
+
+
 @router.post("/session")
 def create_device_session(request: DeviceSessionRequest):
     """Exchange a provisioned device credential for a trip-scoped session."""

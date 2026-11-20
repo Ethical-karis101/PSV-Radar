@@ -51,6 +51,18 @@ detection; the event review queue remains the safeguard for mistakes.
 
 ## Camera session authentication and Android duty flow
 
+### Local browser demo for the hackathon
+
+For a laptop/webcam presentation, `edge_agent/webcam_ui.py` serves a local
+browser console at `http://127.0.0.1:8765`. Detection and tracking run in the
+local Python process; camera frames are not uploaded. The UI draws the virtual
+door line and person boxes, displays boarding/alighting crossings, and publishes
+the event metadata through the existing edge-agent API. It also sends an
+authenticated device heartbeat so the owner dashboard's **Cameras** section can
+show device health and event totals. See [`edge_agent/README.md`](../edge_agent/README.md)
+for setup and run instructions. This is a supervised demo, not a substitute for
+the planned Android foreground-service app.
+
 Camera events must use a short-lived session token. The following is the target
 workflow for the dedicated Android camera app:
 
