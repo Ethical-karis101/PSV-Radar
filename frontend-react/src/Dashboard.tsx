@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 import './Dashboard.css'
+import './FleetRoutes.css'
 
 const API = import.meta.env.VITE_API_URL ?? (import.meta.env.PROD ? window.location.origin : 'http://localhost:8000')
 type View = 'overview' | 'trips' | 'vehicles' | 'conductors' | 'reviews'
@@ -8,7 +9,7 @@ type Summary = { trips: number; expected_revenue_kes: number; declared_revenue_k
 type Trip = { trip_id: string; registration: string; route_name: string; direction: string; conductor_name?: string; status: string; expected_revenue_kes: number; declared_revenue_kes?: number }
 type Review = { case_id: string; reason: string; registration?: string; route_name?: string; created_at: string; status?: string; event_id?: string; note?: string }
 type Vehicle = { vehicle_id: string; registration: string; route_id?: string; route_name?: string; active: number }
-type Route = { route_id: string; name: string; origin: string; destination: string }
+type Route = { route_id: string; name: string; origin: string; destination: string; stages?: { stage_id: string; name: string; stage_order: number }[] }
 type TrendDay = { day: string; expected_revenue_kes: number; completed_journeys: number; boardings: number }
 type User = { name: string; email: string }
 
@@ -95,7 +96,148 @@ function Overview({ summary, trips, reviews, vehicles, onNavigate }: { summary: 
 
 function TripsView({ trips }: { trips: Trip[] }) { const [status, setStatus] = useState('all'); const filtered = status === 'all' ? trips : trips.filter((trip) => trip.status === status); return <section className="panel full-panel"><div className="view-heading"><div><p className="eyebrow">Operations</p><h2>Trips</h2><p>Review every run, conductor, expected fare, and collection variance.</p></div><select className="filter-select" value={status} onChange={(event) => setStatus(event.target.value)} aria-label="Filter trips"><option value="all">All statuses</option><option value="active">Active</option><option value="scheduled">Scheduled</option><option value="ended">Ended</option></select></div><TripTable trips={filtered} empty="No trips match this filter." /></section> }
 
-function VehiclesView({ vehicles, routes, onSaved }: { vehicles: Vehicle[]; routes: Route[]; onSaved: () => Promise<void> }) { const [message, setMessage] = useState(''); const [error, setError] = useState(''); async function create(event: FormEvent<HTMLFormElement>) { event.preventDefault(); setMessage(''); setError(''); const fields = new FormData(event.currentTarget); const response = await fetch(`${API}/operations/vehicles`, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ vehicle_id: fields.get('vehicle_id'), registration: fields.get('registration'), route_id: fields.get('route_id') || null }) }); const payload = await response.json().catch(() => ({})); if (!response.ok) { setError(payload.detail ?? 'Could not add vehicle.'); return } event.currentTarget.reset(); setMessage('Vehicle added successfully.'); await onSaved() } return <section className="owner-columns"><article className="panel full-panel"><div className="view-heading"><div><p className="eyebrow">Fleet</p><h2>Vehicles</h2><p>Keep vehicle assignments ready for trip and camera operations.</p></div><span className="count-badge">{vehicles.length}</span></div><div className="vehicle-list">{vehicles.length === 0 ? <p className="empty-state">No vehicles registered yet.</p> : vehicles.map((vehicle) => <div className="vehicle-row" key={vehicle.vehicle_id}><span className="vehicle-icon">▣</span><div><strong>{vehicle.registration}</strong><span>{vehicle.vehicle_id} · {vehicle.route_name ?? 'No route assigned'}</span></div><em className={vehicle.active ? 'active' : ''}>{vehicle.active ? 'Active' : 'Inactive'}</em></div>)}</div></article><article className="panel full-panel"><p className="eyebrow">Fleet setup</p><h2>Add a vehicle</h2><form className="owner-form" onSubmit={create}><label>Vehicle ID<input name="vehicle_id" required placeholder="psv-van-01" /></label><label>Registration<input name="registration" required placeholder="KDA 418M" /></label><label>Default route<select name="route_id"><option value="">No route yet</option>{routes.map((route) => <option key={route.route_id} value={route.route_id}>{route.name}</option>)}</select></label>{error && <p className="form-error" role="alert">{error}</p>}{message && <p className="form-success" role="status">{message}</p>}<button className="primary-action" type="submit">Add vehicle <span>↗</span></button></form></article></section> }
+function VehiclesView({ vehicles, routes, onSaved }: { vehicles: Vehicle[]; routes: Route[]; onSaved: () => Promise<void> }) {
+  const [routeName, setRouteName] = useState('')
+  const [origin, setOrigin] = useState('')
+  const [destination, setDestination] = useState('')
+  const [intermediateStops, setIntermediateStops] = useState<string[]>([])
+  const [fareRules, setFareRules] = useState([{ boardingIndex: '0', alightingIndex: 'last', fare: '' }])
+  const [routeBusy, setRouteBusy] = useState(false)
+  const [routeMessage, setRouteMessage] = useState('')
+  const [routeError, setRouteError] = useState('')
+  const [vehicleMessage, setVehicleMessage] = useState('')
+  const [vehicleError, setVehicleError] = useState('')
+  const routeId = slugify(routeName).slice(0, 80)
+
+  async function createRoute(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setRouteMessage('')
+    setRouteError('')
+    const routeStages = [origin.trim(), ...intermediateStops.map((stop) => stop.trim()).filter(Boolean), destination.trim()]
+    if (new Set(routeStages.map((stop) => stop.toLocaleLowerCase())).size !== routeStages.length) {
+      setRouteError('Each stop must have a different name.')
+      return
+    }
+    const stages = routeStages.map((name, index) => ({
+      stage_id: `${String(index + 1).padStart(2, '0')}-${slugify(name).slice(0, 60) || `stop-${index + 1}`}`,
+      name,
+    }))
+    const configuredRules = fareRules.filter((rule) => rule.fare !== '')
+    const farePairs = new Set<string>()
+    const fares = []
+    for (const rule of configuredRules) {
+      const boardingIndex = Number(rule.boardingIndex)
+      const alightingIndex = rule.alightingIndex === 'last' ? stages.length - 1 : Number(rule.alightingIndex)
+      if (!stages[boardingIndex] || !stages[alightingIndex]) {
+        setRouteError('A fare rule refers to a stop that was removed. Please update or remove that rule.')
+        return
+      }
+      if (boardingIndex === alightingIndex) {
+        setRouteError('A fare must be for travel between two different stops.')
+        return
+      }
+      const pair = `${boardingIndex}:${alightingIndex}`
+      if (farePairs.has(pair)) {
+        setRouteError('Each stop pair can only have one fare rule.')
+        return
+      }
+      farePairs.add(pair)
+      fares.push({
+        boarding_stage: stages[boardingIndex].stage_id,
+        alighting_stage: stages[alightingIndex].stage_id,
+        fare_kes: Number(rule.fare),
+      })
+    }
+    setRouteBusy(true)
+    try {
+      const response = await fetch(`${API}/operations/routes`, {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ route_id: routeId, name: routeName.trim(), origin: origin.trim(), destination: destination.trim(), stages, fares }),
+      })
+      const payload = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(payload.detail ?? 'Could not create route.')
+      setRouteMessage('Route created. It is now available in the vehicle setup form.')
+      setRouteName(''); setOrigin(''); setDestination(''); setIntermediateStops([])
+      setFareRules([{ boardingIndex: '0', alightingIndex: 'last', fare: '' }])
+      await onSaved()
+    } catch (requestError) {
+      setRouteError(requestError instanceof Error ? requestError.message : 'Could not create route.')
+    } finally {
+      setRouteBusy(false)
+    }
+  }
+
+  async function createVehicle(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setVehicleMessage(''); setVehicleError('')
+    const form = event.currentTarget
+    const fields = new FormData(form)
+    try {
+      const response = await fetch(`${API}/operations/vehicles`, {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ vehicle_id: fields.get('vehicle_id'), registration: fields.get('registration'), route_id: fields.get('route_id') || null }),
+      })
+      const payload = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(payload.detail ?? 'Could not add vehicle.')
+      form.reset(); setVehicleMessage('Vehicle added successfully.'); await onSaved()
+    } catch (requestError) {
+      setVehicleError(requestError instanceof Error ? requestError.message : 'Could not add vehicle.')
+    }
+  }
+
+  const routeStages = [origin.trim(), ...intermediateStops.map((stop) => stop.trim()).filter(Boolean), destination.trim()].filter(Boolean)
+  return <section className="owner-columns fleet-layout">
+    <div className="fleet-setup-stack">
+      <article className="panel full-panel">
+        <div className="view-heading"><div><p className="eyebrow">Fleet routes</p><h2>Routes</h2><p>Routes define the stops and fare stages used to calculate journeys.</p></div><span className="count-badge">{routes.length}</span></div>
+        {routes.length ? <div className="vehicle-list">{routes.map((route) => <div className="vehicle-row route-row" key={route.route_id}><span className="vehicle-icon">↗</span><div><strong>{route.name}</strong><span>{route.origin} → {route.destination} · {route.stages?.length ?? 0} stages</span></div></div>)}</div> : <p className="empty-state">No routes yet. Create one to make it available for vehicle assignments.</p>}
+      </article>
+      <article className="panel full-panel">
+        <div className="view-heading"><div><p className="eyebrow">Fleet</p><h2>Vehicles</h2><p>Keep vehicle assignments ready for trip and camera operations.</p></div><span className="count-badge">{vehicles.length}</span></div>
+        <div className="vehicle-list">{vehicles.length === 0 ? <p className="empty-state">No vehicles registered yet.</p> : vehicles.map((vehicle) => <div className="vehicle-row" key={vehicle.vehicle_id}><span className="vehicle-icon">▣</span><div><strong>{vehicle.registration}</strong><span>{vehicle.vehicle_id} · {vehicle.route_name ?? 'No route assigned'}</span></div><em className={vehicle.active ? 'active' : ''}>{vehicle.active ? 'Active' : 'Inactive'}</em></div>)}</div>
+      </article>
+    </div>
+    <div className="fleet-setup-stack">
+      <article className="panel full-panel">
+        <p className="eyebrow">Route setup</p><h2>Add a route</h2>
+        <p className="form-intro">Stops are ordered from origin to destination. Route ID: <code>{routeId || 'generated-from-name'}</code></p>
+        <form className="owner-form" onSubmit={(event) => void createRoute(event)}>
+          <label>Route name<input value={routeName} onChange={(event) => setRouteName(event.target.value)} maxLength={120} required placeholder="e.g. Rongai – CBD" /></label>
+          <div className="route-endpoints"><label>Origin<input value={origin} onChange={(event) => setOrigin(event.target.value)} maxLength={120} required placeholder="Starting point" /></label><label>Destination<input value={destination} onChange={(event) => setDestination(event.target.value)} maxLength={120} required placeholder="Final stop" /></label></div>
+          <fieldset className="route-stops"><legend>Intermediate stops <span className="optional">Optional · in travel order</span></legend>
+            {intermediateStops.map((stop, index) => <div className="route-stop-row" key={index}><label className="sr-only" htmlFor={`route-stop-${index}`}>Stop {index + 1}</label><input id={`route-stop-${index}`} value={stop} onChange={(event) => setIntermediateStops((items) => items.map((item, itemIndex) => itemIndex === index ? event.target.value : item))} maxLength={120} placeholder={`Stop ${index + 1}`} /><button type="button" className="remove-stop" aria-label={`Remove stop ${index + 1}`} onClick={() => setIntermediateStops((items) => items.filter((_, itemIndex) => itemIndex !== index))}>×</button></div>)}
+            <button type="button" className="add-stop" onClick={() => setIntermediateStops((items) => [...items, ''])}>+ Add stop</button>
+          </fieldset>
+          <fieldset className="route-stops fare-rules"><legend>Fare rules <span className="optional">Optional, in KES</span></legend>
+            <p className="route-hint">Add a fare for each stop pair you charge differently. Unconfigured journeys are sent for review instead of receiving a guessed fare.</p>
+            {fareRules.map((rule, index) => <div className="fare-rule-row" key={index}>
+              <label className="sr-only" htmlFor={`fare-from-${index}`}>Boarding stop</label><select id={`fare-from-${index}`} value={rule.boardingIndex} onChange={(event) => setFareRules((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, boardingIndex: event.target.value } : item))}>{routeStages.map((stage, stageIndex) => <option key={stageIndex} value={stageIndex}>{stage || `Stop ${stageIndex + 1}`}</option>)}</select>
+              <span aria-hidden="true">→</span>
+              <label className="sr-only" htmlFor={`fare-to-${index}`}>Alighting stop</label><select id={`fare-to-${index}`} value={rule.alightingIndex === 'last' ? String(Math.max(routeStages.length - 1, 1)) : rule.alightingIndex} onChange={(event) => setFareRules((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, alightingIndex: event.target.value } : item))}>{routeStages.map((stage, stageIndex) => <option key={stageIndex} value={stageIndex}>{stage || `Stop ${stageIndex + 1}`}</option>)}</select>
+              <label className="sr-only" htmlFor={`fare-amount-${index}`}>Fare in Kenyan shillings</label><input id={`fare-amount-${index}`} type="number" min="0" step="1" inputMode="numeric" value={rule.fare} onChange={(event) => setFareRules((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, fare: event.target.value } : item))} placeholder="KES" />
+              <button type="button" className="remove-stop" aria-label="Remove fare rule" onClick={() => setFareRules((items) => items.filter((_, itemIndex) => itemIndex !== index))}>×</button>
+            </div>)}
+            <button type="button" className="add-stop" onClick={() => setFareRules((items) => [...items, { boardingIndex: '0', alightingIndex: 'last', fare: '' }])}>+ Add fare rule</button>
+          </fieldset>
+          {routeError && <p className="form-error" role="alert">{routeError}</p>}{routeMessage && <p className="form-success" role="status">{routeMessage}</p>}
+          <button className="primary-action" type="submit" disabled={routeBusy || !routeId}>{routeBusy ? 'Creating route…' : 'Create route'} <span>↗</span></button>
+        </form>
+      </article>
+      <article className="panel full-panel">
+        <p className="eyebrow">Fleet setup</p><h2>Add a vehicle</h2>
+        <form className="owner-form" onSubmit={(event) => void createVehicle(event)}>
+          <label>Vehicle ID<input name="vehicle_id" required placeholder="psv-van-01" /></label>
+          <label>Registration<input name="registration" required placeholder="KDA 418M" /></label>
+          <label>Default route<select name="route_id" required={routes.length > 0} disabled={routes.length === 0}><option value="" disabled={routes.length > 0}>{routes.length ? 'Choose a route' : 'Create a route first'}</option>{routes.map((route) => <option key={route.route_id} value={route.route_id}>{route.name}</option>)}</select></label>
+          {vehicleError && <p className="form-error" role="alert">{vehicleError}</p>}{vehicleMessage && <p className="form-success" role="status">{vehicleMessage}</p>}
+          <button className="primary-action" type="submit">Add vehicle <span>↗</span></button>
+        </form>
+      </article>
+    </div>
+  </section>
+}
 
 type ConductorAccount = { user_id: string; conductor_id: string; name: string; email: string; phone?: string; active: number }
 function ConductorsView() {
@@ -137,3 +279,4 @@ function viewFromUrl(): View { const value = new URLSearchParams(window.location
 function viewTitle(view: View) { return view === 'overview' ? 'Your fleet today' : view === 'trips' ? 'Trip log' : view === 'vehicles' ? 'Your vehicles' : view === 'conductors' ? 'Your crew' : 'Trips to check' }
 function initials(name: string) { return name.split(/\s+/).map((part) => part[0]).join('').slice(0, 2).toUpperCase() }
 function formatTime(value: string) { const date = new Date(value); return Number.isNaN(date.getTime()) ? value : date.toLocaleString('en-KE', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) }
+function slugify(value: string) { return value.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') }
